@@ -129,10 +129,9 @@ export async function updateInstallationRequestStatus(
 ) {
   const { data, error } = await client
     .from('installation_request')
-    .update({
-      registration_status: status,
-      updated_at: new Date().toISOString(),
-    })
+    // updated_at is set by a trigger in the district project, so it is not sent
+    // here -- the update grant only covers registration_status.
+    .update({ registration_status: status })
     .eq('id', requestId)
     .select(installationRequestColumns)
     .single()
