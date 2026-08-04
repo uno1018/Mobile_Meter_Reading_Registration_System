@@ -27,6 +27,14 @@ export type InstallationRequest = {
   updated_at: string | null
 }
 
+export type NewWaterDistrict = {
+  water_district: string
+  description: string | null
+  supabase_url: string
+  supabase_anon_key: string
+  active: boolean
+}
+
 export type DeviceStats = {
   total: number
   pending: number

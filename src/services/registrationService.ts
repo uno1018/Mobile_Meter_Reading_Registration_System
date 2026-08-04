@@ -1,5 +1,5 @@
-import type { DistrictClient, InstallationRequest, RegistrationDecision, WaterDistrict } from '../types'
-import { getCentralSupabaseClient } from './supabaseFactory'
+import type { DistrictClient, InstallationRequest, NewWaterDistrict, RegistrationDecision, WaterDistrict } from '../types'
+import { createWaterDistrictClient, getCentralSupabaseClient } from './supabaseFactory'
 
 const installationRequestColumns = `
   id,
@@ -107,6 +107,47 @@ export async function fetchWaterDistrict(waterDistrictId: string) {
   }
 
   return data as WaterDistrict
+}
+
+export async function createWaterDistrict(input: NewWaterDistrict) {
+  const supabase = getCentralSupabaseClient()
+  const { data, error } = await supabase
+    .from('RegistrationApp')
+    .insert(input)
+    .select('*')
+    .single()
+
+  if (error) {
+    throw error
+  }
+
+  return data as WaterDistrict
+}
+
+// Probes a district project before its credentials are stored. Anon has no
+// select on installation_request by design, so the check goes through the
+// status function instead -- which also proves the district schema was applied.
+export async function testWaterDistrictConnection(supabaseUrl: string, supabaseAnonKey: string) {
+  const client = createWaterDistrictClient(supabaseUrl, supabaseAnonKey)
+  const { error } = await client.rpc('get_registration_status', {
+    p_device_id: '__connection_test__',
+  })
+
+  if (!error) {
+    return
+  }
+
+  if (error.code === 'PGRST202') {
+    throw new Error(
+      'Reached the project, but get_registration_status is missing. Run supabase/installation_request.sql there first.',
+    )
+  }
+
+  if (/api key/i.test(error.message)) {
+    throw new Error('The project rejected this anon key.')
+  }
+
+  throw new Error(error.message)
 }
 
 export async function fetchInstallationRequests(client: DistrictClient) {

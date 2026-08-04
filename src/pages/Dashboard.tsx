@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { AlertTriangle, Building2, CheckCircle2, Database, Smartphone, Wifi, XCircle } from 'lucide-react'
-import { fetchWaterDistricts } from '../services/registrationService'
+import { AlertTriangle, Building2, CheckCircle2, Database, Plus, Smartphone, Wifi, XCircle } from 'lucide-react'
+import { fetchWaterDistricts, getAdminSession } from '../services/registrationService'
 import { getCentralConfigError } from '../services/supabaseFactory'
 import type { WaterDistrict } from '../types'
+import AddWaterDistrictDialog from '../components/AddWaterDistrictDialog'
 import { CardSkeleton } from '../components/LoadingSkeleton'
 import StatCard from '../components/StatCard'
 import WaterDistrictCard from '../components/WaterDistrictCard'
@@ -12,6 +13,7 @@ import WaterDistrictCard from '../components/WaterDistrictCard'
 export default function Dashboard() {
   const navigate = useNavigate()
   const centralConfigError = getCentralConfigError()
+  const [addOpen, setAddOpen] = useState(false)
   const [connectingDistrictId, setConnectingDistrictId] = useState<string | null>(null)
   const [lastConnectedDistrict, setLastConnectedDistrict] = useState(() => {
     if (typeof window === 'undefined') {
@@ -21,6 +23,12 @@ export default function Dashboard() {
     return window.localStorage.getItem('connected-water-district') ?? 'None'
   })
 
+  const adminSessionQuery = useQuery({
+    queryKey: ['admin-session'],
+    queryFn: getAdminSession,
+    enabled: !centralConfigError,
+  })
+
   const waterDistrictsQuery = useQuery({
     queryKey: ['water-districts'],
     queryFn: fetchWaterDistricts,
@@ -28,6 +36,7 @@ export default function Dashboard() {
   })
 
   const waterDistricts = waterDistrictsQuery.data ?? []
+  const canAddDistrict = Boolean(adminSessionQuery.data)
 
   const handleConnect = (district: WaterDistrict) => {
     setConnectingDistrictId(district.id)
@@ -88,7 +97,19 @@ export default function Dashboard() {
               Active rows can connect to their independent Supabase project.
             </p>
           </div>
-          <Database className="h-5 w-5 text-slate-400" aria-hidden="true" />
+          <div className="flex items-center gap-3">
+            <Database className="h-5 w-5 text-slate-400" aria-hidden="true" />
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-600 dark:disabled:bg-neutral-700 dark:disabled:text-slate-400"
+              disabled={!canAddDistrict}
+              onClick={() => setAddOpen(true)}
+              title={canAddDistrict ? undefined : 'Sign in as an administrator to add a Water District'}
+              type="button"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Add Water District
+            </button>
+          </div>
         </div>
 
         {waterDistrictsQuery.isLoading ? (
@@ -115,11 +136,25 @@ export default function Dashboard() {
               No Water Districts registered
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Insert rows into `RegistrationApp` to make them available here.
+              {canAddDistrict
+                ? 'Add a district Supabase project to make it available here.'
+                : 'Sign in as an administrator to add a Water District.'}
             </p>
+            {canAddDistrict ? (
+              <button
+                className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800"
+                onClick={() => setAddOpen(true)}
+                type="button"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Add Water District
+              </button>
+            ) : null}
           </div>
         )}
       </section>
+
+      <AddWaterDistrictDialog onClose={() => setAddOpen(false)} open={addOpen} />
     </div>
   )
 }
