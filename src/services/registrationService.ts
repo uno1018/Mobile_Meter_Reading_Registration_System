@@ -54,6 +54,23 @@ export async function signInAdmin(email: string, password: string) {
   }
 }
 
+export async function signUpAdmin(email: string, password: string) {
+  const supabase = getCentralSupabaseClient()
+  const { data, error } = await supabase.auth.signUp({ email, password })
+
+  if (error) {
+    throw error
+  }
+
+  // The registration_admin claim lives in app_metadata, which the client cannot
+  // write. A new account can sign in but sees nothing until an existing
+  // administrator grants the claim.
+  return {
+    email: data.user?.email ?? email,
+    needsEmailConfirmation: !data.session,
+  }
+}
+
 export async function signOutAdmin() {
   const supabase = getCentralSupabaseClient()
   const { error } = await supabase.auth.signOut()

@@ -15,10 +15,11 @@ type SignInValues = z.infer<typeof signInSchema>
 
 type SignInDialogProps = {
   onClose: () => void
+  onSwitchToSignUp: () => void
   open: boolean
 }
 
-export default function SignInDialog({ onClose, open }: SignInDialogProps) {
+export default function SignInDialog({ onClose, onSwitchToSignUp, open }: SignInDialogProps) {
   const queryClient = useQueryClient()
   const { addToast } = useToast()
   const {
@@ -124,6 +125,17 @@ export default function SignInDialog({ onClose, open }: SignInDialogProps) {
             Sign In
           </button>
         </div>
+
+        <p className="mt-6 border-t border-slate-200 pt-4 text-center text-sm text-slate-600 dark:border-neutral-800 dark:text-slate-300">
+          Need an administrator account?{' '}
+          <button
+            className="font-semibold text-teal-700 underline transition hover:text-teal-800 dark:text-teal-300"
+            onClick={onSwitchToSignUp}
+            type="button"
+          >
+            Register
+          </button>
+        </p>
       </form>
     </div>
   )

@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, LogOut, Moon, ShieldCheck, Sun, User } from 'lucide-react'
+import { Loader2, LogOut, Moon, ShieldCheck, Sun, User, UserPlus } from 'lucide-react'
 import type { AdminSession } from '../types'
 import { signOutAdmin } from '../services/registrationService'
 import { useToast } from '../hooks/useToast'
 import SignInDialog from './SignInDialog'
+import SignUpDialog from './SignUpDialog'
+
+type AuthDialog = 'signIn' | 'signUp' | null
 
 type NavbarProps = {
   adminSession: AdminSession | null
@@ -25,7 +28,7 @@ export default function Navbar({
   theme,
   title,
 }: NavbarProps) {
-  const [signInOpen, setSignInOpen] = useState(false)
+  const [authDialog, setAuthDialog] = useState<AuthDialog>(null)
   const queryClient = useQueryClient()
   const { addToast } = useToast()
 
@@ -103,21 +106,41 @@ export default function Navbar({
                 </button>
               </div>
             ) : (
-              <button
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:bg-slate-300 dark:disabled:bg-neutral-700"
-                disabled={Boolean(configError)}
-                onClick={() => setSignInOpen(true)}
-                type="button"
-              >
-                <User className="h-4 w-4" aria-hidden="true" />
-                Sign In
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-slate-200 dark:hover:bg-neutral-800"
+                  disabled={Boolean(configError)}
+                  onClick={() => setAuthDialog('signUp')}
+                  type="button"
+                >
+                  <UserPlus className="h-4 w-4" aria-hidden="true" />
+                  Register
+                </button>
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:bg-slate-300 dark:disabled:bg-neutral-700"
+                  disabled={Boolean(configError)}
+                  onClick={() => setAuthDialog('signIn')}
+                  type="button"
+                >
+                  <User className="h-4 w-4" aria-hidden="true" />
+                  Sign In
+                </button>
+              </div>
             )}
           </div>
         </div>
       </header>
 
-      <SignInDialog onClose={() => setSignInOpen(false)} open={signInOpen} />
+      <SignInDialog
+        onClose={() => setAuthDialog(null)}
+        onSwitchToSignUp={() => setAuthDialog('signUp')}
+        open={authDialog === 'signIn'}
+      />
+      <SignUpDialog
+        onClose={() => setAuthDialog(null)}
+        onSwitchToSignIn={() => setAuthDialog('signIn')}
+        open={authDialog === 'signUp'}
+      />
     </>
   )
 }
