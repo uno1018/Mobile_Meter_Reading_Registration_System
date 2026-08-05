@@ -24,6 +24,7 @@ export type InstallationRequest = {
   app_version_code: number | null
   installed_at: string | null
   registration_status: RegistrationStatus | null
+  status_before_disable: RegistrationStatus | null
   first_registered_at: string | null
   updated_at: string | null
 }

@@ -6,6 +6,8 @@ import {
   Building2,
   CheckCircle2,
   Database,
+  Loader2,
+  Power,
   ShieldCheck,
   Smartphone,
   Wifi,
@@ -18,9 +20,11 @@ import StatCard from '../components/StatCard'
 import { useToast } from '../hooks/useToast'
 import { useSupabaseConnection } from '../hooks/useSupabaseConnection'
 import {
+  fetchDistrictDevicesEnabled,
   fetchInstallationRequests,
   fetchWaterDistrict,
   getAdminSession,
+  setDistrictDevicesEnabled,
   updateInstallationRequestStatus,
 } from '../services/registrationService'
 import { getCentralConfigError } from '../services/supabaseFactory'
@@ -39,6 +43,7 @@ export default function WaterDistrict() {
   const centralConfigError = getCentralConfigError()
   const [pendingDecision, setPendingDecision] = useState<PendingDecision | null>(null)
   const [detailRequest, setDetailRequest] = useState<InstallationRequest | null>(null)
+  const [confirmDisable, setConfirmDisable] = useState(false)
 
   const adminSessionQuery = useQuery({
     queryKey: ['admin-session'],
@@ -71,6 +76,48 @@ export default function WaterDistrict() {
       return fetchInstallationRequests(client, districtAdminKey)
     },
     enabled: Boolean(client && isConnected),
+  })
+
+  const devicesEnabledQuery = useQuery({
+    queryKey: ['district-devices-enabled', districtId],
+    queryFn: () => {
+      if (!client) {
+        throw new Error('Water District connection is not ready')
+      }
+
+      return fetchDistrictDevicesEnabled(client, districtAdminKey)
+    },
+    enabled: Boolean(client && isConnected),
+  })
+
+  const devicesEnabled = devicesEnabledQuery.data ?? true
+
+  const serviceMutation = useMutation({
+    mutationFn: (enabled: boolean) => {
+      if (!client) {
+        throw new Error('Water District connection is not ready')
+      }
+
+      return setDistrictDevicesEnabled(client, districtAdminKey, enabled)
+    },
+    onError: (error) => {
+      addToast({
+        message: error instanceof Error ? error.message : 'The district could not be switched.',
+        title: 'Change failed',
+        type: 'error',
+      })
+    },
+    onSuccess: async (enabled) => {
+      await queryClient.invalidateQueries({ queryKey: ['district-devices-enabled', districtId] })
+      addToast({
+        message: enabled
+          ? 'Approvals are restored and devices can register again.'
+          : 'Every approved device in this district now reads back DISABLED.',
+        title: enabled ? 'District enabled' : 'District disabled',
+        type: 'success',
+      })
+      setConfirmDisable(false)
+    },
   })
 
   const stats = useMemo(
@@ -186,6 +233,32 @@ export default function WaterDistrict() {
               <ShieldCheck className="h-4 w-4 text-teal-700 dark:text-teal-300" aria-hidden="true" />
               {adminSessionQuery.data ? 'Admin Session' : 'Read Only'}
             </span>
+
+            {canMutate ? (
+              <button
+                className={
+                  devicesEnabled
+                    ? 'inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-70 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10'
+                    : 'inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-70 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10'
+                }
+                disabled={devicesEnabledQuery.isLoading || serviceMutation.isPending}
+                onClick={() => {
+                  if (devicesEnabled) {
+                    setConfirmDisable(true)
+                  } else {
+                    serviceMutation.mutate(true)
+                  }
+                }}
+                type="button"
+              >
+                {serviceMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Power className="h-4 w-4" aria-hidden="true" />
+                )}
+                {devicesEnabled ? 'Disable Devices' : 'Enable Devices'}
+              </button>
+            ) : null}
           </div>
         </div>
       </section>
@@ -202,6 +275,22 @@ export default function WaterDistrict() {
       {!adminSessionQuery.data ? (
         <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
           Sign in as an administrator to approve or deny devices.
+        </section>
+      ) : null}
+
+      {devicesEnabledQuery.data === false ? (
+        <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100">
+          <div className="flex items-start gap-3">
+            <Power className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+            <div>
+              <h2 className="font-semibold">Devices are disabled for this district</h2>
+              <p className="mt-1 leading-6">
+                Approved handsets read back DISABLED and cannot work, and new devices cannot
+                register. Approving a device here is staged and takes effect once the district is
+                enabled again.
+              </p>
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -233,6 +322,17 @@ export default function WaterDistrict() {
           void installationRequestsQuery.refetch()
         }}
         onViewDetails={setDetailRequest}
+      />
+
+      <ConfirmDialog
+        confirmLabel="Disable Devices"
+        description={`Every approved device in ${connectedDistrict.water_district} will be set to DISABLED and stop working, and no new device can register. Pending and denied devices are left as they are. Approvals are restored when you enable the district again.`}
+        isLoading={serviceMutation.isPending}
+        onCancel={() => setConfirmDisable(false)}
+        onConfirm={() => serviceMutation.mutate(false)}
+        open={confirmDisable}
+        title="Disable devices for this district?"
+        variant="deny"
       />
 
       <ConfirmDialog

@@ -7,7 +7,10 @@ export function normalizeStatus(status: RegistrationStatus | null | undefined) {
 export function calculateDeviceStats(requests: InstallationRequest[]): DeviceStats {
   return requests.reduce<DeviceStats>(
     (stats, request) => {
-      const status = normalizeStatus(request.registration_status)
+      // While a district is disabled every row reads DISABLED, so counting the
+      // stored status would report the whole fleet as pending. The status each
+      // device returns to is the one worth showing.
+      const status = normalizeStatus(request.status_before_disable ?? request.registration_status)
       stats.total += 1
 
       if (status === 'APPROVED') {

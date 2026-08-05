@@ -50,6 +50,14 @@ The console therefore authenticates to a district with a per-district admin key,
 
 The district stores only a SHA-256 hash, so the value in the registry row is the only copy. **Test Connection** verifies the key as well as the schema, so a mismatch is caught before the row is saved.
 
+### Disabling a district
+
+**Disable Devices** on the district page switches off the whole district. It writes `DISABLED` onto the `APPROVED` rows in that project's `installation_requests`, so a handset polling `get_registration_status` sees it without the Android app needing to know districts exist, and the insert policy stops new devices registering. `PENDING` and `DENIED` rows are left alone — neither grants access, so there is nothing to take away.
+
+The previous status is saved to `status_before_disable` and restored when you enable the district again, so switching off and back on does not lose approvals. Approving a device while a district is disabled is staged the same way and applies on enable, rather than handing access straight back; denying is applied immediately, since it only takes access away.
+
+This lives in the district project, not `RegistrationApp`. Phones only ever talk to their own district, so a flag in the central registry would stop the console connecting without affecting a single handset — `active` on `RegistrationApp` does exactly that and nothing more.
+
 To rotate a key later, edit the district and click **Regenerate**. The statement to run reappears, and it is only shown when the key actually changed — editing a name or description leaves the district untouched. Deleting a district removes the registry row only; its devices stay in its own project, so re-adding it brings the inventory back.
 
 The app creates Water District clients at runtime with:

@@ -263,6 +263,40 @@ export async function fetchInstallationRequests(
   return (data ?? []) as InstallationRequest[]
 }
 
+// The district wide kill switch. Lives in the district project because that is
+// the only one handsets talk to.
+export async function fetchDistrictDevicesEnabled(
+  client: DistrictClient,
+  adminKey: string | null | undefined,
+) {
+  const { data, error } = await client.rpc('admin_get_district_devices_enabled', {
+    p_admin_key: requireAdminKey(adminKey),
+  })
+
+  if (error) {
+    throw toError(error, 'The district service state could not be read.')
+  }
+
+  return Boolean(data)
+}
+
+export async function setDistrictDevicesEnabled(
+  client: DistrictClient,
+  adminKey: string | null | undefined,
+  enabled: boolean,
+) {
+  const { data, error } = await client.rpc('admin_set_district_devices_enabled', {
+    p_admin_key: requireAdminKey(adminKey),
+    p_enabled: enabled,
+  })
+
+  if (error) {
+    throw toError(error, 'The district service state could not be changed.')
+  }
+
+  return Boolean(data)
+}
+
 export async function updateInstallationRequestStatus(
   client: DistrictClient,
   adminKey: string | null | undefined,

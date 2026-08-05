@@ -29,10 +29,26 @@ create table if not exists public.installation_requests (
   app_version_code integer,
   installed_at timestamptz not null default now(),
   registration_status text not null default 'PENDING'
-    check (registration_status in ('PENDING', 'APPROVED', 'DENIED')),
+    check (registration_status in ('PENDING', 'APPROVED', 'DENIED', 'DISABLED')),
+  -- Holds what the status was before a district wide disable, so enabling puts
+  -- every device back where it was instead of making you re-approve them all.
+  status_before_disable text,
   first_registered_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Districts created before DISABLED existed carry the older constraint, under
+-- whichever name the table had when it was written.
+alter table public.installation_requests
+  drop constraint if exists installation_request_registration_status_check;
+alter table public.installation_requests
+  drop constraint if exists installation_requests_registration_status_check;
+alter table public.installation_requests
+  add constraint installation_requests_registration_status_check
+  check (registration_status in ('PENDING', 'APPROVED', 'DENIED', 'DISABLED'));
+
+alter table public.installation_requests
+  add column if not exists status_before_disable text;
 
 -- A rename carries the index over under its old name, so drop it rather than
 -- ending up with two indexes covering the same column.
@@ -61,6 +77,42 @@ before update on public.installation_requests
 for each row execute function public.set_installation_requests_updated_at();
 
 alter table public.installation_requests enable row level security;
+
+-- District wide kill switch for devices.
+--
+-- This has to live here rather than in the central registry: phones only ever
+-- talk to their own district project, so a flag in RegistrationApp would stop
+-- the console connecting without affecting a single handset. Turning this off
+-- blocks new registrations and makes every device read back DISABLED, however
+-- it was previously decided.
+create table if not exists public.district_service (
+  id boolean primary key default true check (id),
+  devices_enabled boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.district_service (id, devices_enabled)
+values (true, true)
+on conflict (id) do nothing;
+
+alter table public.district_service enable row level security;
+
+revoke all on public.district_service from anon, authenticated;
+
+-- Read as the owner so devices can be gated without exposing the table. A
+-- district with no row yet is treated as enabled, matching the default above.
+create or replace function public.district_devices_enabled()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce((select devices_enabled from public.district_service where id), true);
+$$;
+
+revoke all on function public.district_devices_enabled() from public;
+grant execute on function public.district_devices_enabled() to anon, authenticated;
 
 -- Devices self-register with the district anon key, so anon needs insert. The
 -- grant is column scoped: registration_status is omitted, so a device cannot
@@ -92,7 +144,7 @@ create policy "Devices may submit a registration request"
 on public.installation_requests
 for insert
 to anon
-with check (registration_status = 'PENDING');
+with check (registration_status = 'PENDING' and public.district_devices_enabled());
 
 create policy "Registration admins read every request"
 on public.installation_requests
@@ -109,6 +161,9 @@ with check (registration_status in ('PENDING', 'APPROVED', 'DENIED'));
 
 -- Lets a device read back only its own status, instead of granting anon select
 -- over the entire table. Returns null when the device is not registered.
+--
+-- Disabling a district writes DISABLED onto every row, so no special case is
+-- needed here: the stored status is the answer.
 create or replace function public.get_registration_status(p_device_id text)
 returns text
 language sql
@@ -235,11 +290,23 @@ begin
     raise exception 'Status must be APPROVED or DENIED' using errcode = '22023';
   end if;
 
+  -- Approving while the district is disabled would hand access straight back,
+  -- so the approval is staged and applies when the district is switched on.
+  -- Denying is always applied: it takes access away rather than granting it.
   -- updated_at is left to the trigger.
-  update public.installation_requests
-  set registration_status = p_status
-  where id = p_request_id
-  returning * into updated;
+  if p_status = 'APPROVED' and not public.district_devices_enabled() then
+    update public.installation_requests
+    set registration_status = 'DISABLED',
+        status_before_disable = 'APPROVED'
+    where id = p_request_id
+    returning * into updated;
+  else
+    update public.installation_requests
+    set registration_status = p_status,
+        status_before_disable = null
+    where id = p_request_id
+    returning * into updated;
+  end if;
 
   if updated.id is null then
     raise exception 'No installation request with id %', p_request_id
@@ -252,6 +319,73 @@ $$;
 
 revoke all on function public.admin_set_registration_status(text, bigint, text) from public;
 grant execute on function public.admin_set_registration_status(text, bigint, text) to anon, authenticated;
+
+-- The console's view of the kill switch. Separate from district_devices_enabled
+-- above, which anon may call: this one requires the admin key, so the console
+-- can show the state without letting a handset probe it.
+create or replace function public.admin_get_district_devices_enabled(p_admin_key text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions
+stable
+as $$
+begin
+  if not public.district_admin_key_matches(p_admin_key) then
+    raise exception 'Invalid district admin key' using errcode = '42501';
+  end if;
+
+  return public.district_devices_enabled();
+end;
+$$;
+
+revoke all on function public.admin_get_district_devices_enabled(text) from public;
+grant execute on function public.admin_get_district_devices_enabled(text) to anon, authenticated;
+
+-- Flips the whole district. Disabling writes DISABLED onto the APPROVED rows,
+-- so a handset polling get_registration_status sees it without the app needing
+-- to know anything about districts. PENDING and DENIED are left alone: neither
+-- grants access, so there is nothing to take away. The previous status is kept
+-- in status_before_disable and restored on enable, so switching a district off
+-- and back on does not lose approvals.
+create or replace function public.admin_set_district_devices_enabled(
+  p_admin_key text,
+  p_enabled boolean
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.district_admin_key_matches(p_admin_key) then
+    raise exception 'Invalid district admin key' using errcode = '42501';
+  end if;
+
+  insert into public.district_service (id, devices_enabled, updated_at)
+  values (true, p_enabled, now())
+  on conflict (id) do update
+    set devices_enabled = excluded.devices_enabled,
+        updated_at = now();
+
+  if p_enabled then
+    update public.installation_requests
+    set registration_status = coalesce(status_before_disable, 'APPROVED'),
+        status_before_disable = null
+    where registration_status = 'DISABLED';
+  else
+    update public.installation_requests
+    set status_before_disable = registration_status,
+        registration_status = 'DISABLED'
+    where registration_status = 'APPROVED';
+  end if;
+
+  return p_enabled;
+end;
+$$;
+
+revoke all on function public.admin_set_district_devices_enabled(text, boolean) from public;
+grant execute on function public.admin_set_district_devices_enabled(text, boolean) to anon, authenticated;
 
 -- PostgREST caches the schema, so a freshly created function can keep coming
 -- back as PGRST202 until it reloads.
