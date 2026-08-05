@@ -8,6 +8,7 @@ export type WaterDistrict = {
   description: string | null
   supabase_url: string
   supabase_anon_key: string
+  district_admin_key: string | null
   active: boolean
   created_at: string
 }
@@ -32,6 +33,7 @@ export type NewWaterDistrict = {
   description: string | null
   supabase_url: string
   supabase_anon_key: string
+  district_admin_key: string
   active: boolean
 }
 

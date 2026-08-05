@@ -21,11 +21,17 @@ function toError(error: unknown, fallbackMessage: string) {
   const parts = [message?.trim() || fallbackMessage]
 
   // The registry lives behind a registration_admin check, and an account
-  // without the claim is the usual reason an insert here is refused.
-  if (code === '42501') {
+  // without the claim is the usual reason an insert here is refused. The
+  // district functions raise 42501 too, but say so in their own message.
+  if (code === '42501' && !message?.includes('district admin key')) {
     parts.push(
       'The signed-in account is missing the registration_admin claim in app_metadata. Grant it in the central project, then sign out and back in.',
     )
+  }
+
+  // A district that has not had the current schema applied.
+  if (code === 'PGRST202') {
+    parts.push('Run supabase/installation_requests.sql in the district project.')
   }
 
   if (hint) {
@@ -41,21 +47,6 @@ function toError(error: unknown, fallbackMessage: string) {
 
   return wrapped
 }
-
-const installationRequestColumns = `
-  id,
-  device_id,
-  manufacturer,
-  device_model,
-  os_version,
-  sdk_int,
-  app_version,
-  app_version_code,
-  installed_at,
-  registration_status,
-  first_registered_at,
-  updated_at
-`
 
 export async function getAdminSession() {
   const supabase = getCentralSupabaseClient()
@@ -168,34 +159,75 @@ export async function createWaterDistrict(input: NewWaterDistrict) {
 // Probes a district project before its credentials are stored. Anon has no
 // select on installation_requests by design, so the check goes through the
 // status function instead -- which also proves the district schema was applied.
-export async function testWaterDistrictConnection(supabaseUrl: string, supabaseAnonKey: string) {
+export async function testWaterDistrictConnection(
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+  adminKey: string,
+) {
   const client = createWaterDistrictClient(supabaseUrl, supabaseAnonKey)
   const { error } = await client.rpc('get_registration_status', {
     p_device_id: '__connection_test__',
   })
 
-  if (!error) {
-    return
+  if (error) {
+    if (error.code === 'PGRST202') {
+      throw new Error(
+        'Reached the project, but get_registration_status is missing. Run supabase/installation_requests.sql there first.',
+      )
+    }
+
+    if (/api key/i.test(error.message)) {
+      throw new Error('The project rejected this anon key.')
+    }
+
+    throw toError(error, 'The district project could not be reached.')
   }
 
-  if (error.code === 'PGRST202') {
+  // The anon probe above only proves the project is reachable and carries the
+  // schema. The console reads devices through the admin key, so check that too
+  // -- otherwise a district saves cleanly and then fails on the first page load.
+  const adminProbe = await client.rpc('admin_list_installation_requests', {
+    p_admin_key: adminKey,
+  })
+
+  if (adminProbe.error) {
+    if (adminProbe.error.code === 'PGRST202') {
+      throw new Error(
+        'The district project has an older schema without the console functions. Re-run supabase/installation_requests.sql there.',
+      )
+    }
+
+    if (adminProbe.error.code === '42501') {
+      throw new Error(
+        'The project did not accept this admin key. Run set_district_admin_key there with the same value.',
+      )
+    }
+
+    throw toError(adminProbe.error, 'The admin key could not be verified.')
+  }
+}
+
+// Both district calls go through security definer functions that check the
+// admin key, rather than selecting the table directly: the district cannot
+// verify the central project's token, so there is no district session to
+// authorize against.
+function requireAdminKey(adminKey: string | null | undefined) {
+  if (!adminKey) {
     throw new Error(
-      'Reached the project, but get_registration_status is missing. Run supabase/installation_requests.sql there first.',
+      'This Water District has no admin key. Add one to its registry row, then run set_district_admin_key with the same value in the district project.',
     )
   }
 
-  if (/api key/i.test(error.message)) {
-    throw new Error('The project rejected this anon key.')
-  }
-
-  throw toError(error, 'The district project could not be reached.')
+  return adminKey
 }
 
-export async function fetchInstallationRequests(client: DistrictClient) {
-  const { data, error } = await client
-    .from('installation_requests')
-    .select(installationRequestColumns)
-    .order('installed_at', { ascending: false, nullsFirst: false })
+export async function fetchInstallationRequests(
+  client: DistrictClient,
+  adminKey: string | null | undefined,
+) {
+  const { data, error } = await client.rpc('admin_list_installation_requests', {
+    p_admin_key: requireAdminKey(adminKey),
+  })
 
   if (error) {
     throw toError(error, 'The installation requests could not be read.')
@@ -206,17 +238,15 @@ export async function fetchInstallationRequests(client: DistrictClient) {
 
 export async function updateInstallationRequestStatus(
   client: DistrictClient,
+  adminKey: string | null | undefined,
   requestId: number,
   status: RegistrationDecision,
 ) {
-  const { data, error } = await client
-    .from('installation_requests')
-    // updated_at is set by a trigger in the district project, so it is not sent
-    // here -- the update grant only covers registration_status.
-    .update({ registration_status: status })
-    .eq('id', requestId)
-    .select(installationRequestColumns)
-    .single()
+  const { data, error } = await client.rpc('admin_set_registration_status', {
+    p_admin_key: requireAdminKey(adminKey),
+    p_request_id: requestId,
+    p_status: status,
+  })
 
   if (error) {
     throw toError(error, 'The registration status could not be updated.')

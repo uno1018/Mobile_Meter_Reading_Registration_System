@@ -39,22 +39,14 @@ export function getCentralSupabaseClient() {
   return centralClient
 }
 
-export function createWaterDistrictClient(
-  supabaseUrl: string,
-  supabaseAnonKey: string,
-  accessToken?: string,
-) {
+// Anon only. The central project's access token used to be forwarded here, but
+// a district cannot verify a token another project signed, so district access
+// goes through the admin key checked inside that project's own functions.
+export function createWaterDistrictClient(supabaseUrl: string, supabaseAnonKey: string) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-    global: accessToken
-      ? {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      : undefined,
   })
 }

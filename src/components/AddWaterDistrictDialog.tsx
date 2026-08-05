@@ -10,6 +10,7 @@ import { useToast } from '../hooks/useToast'
 const waterDistrictSchema = z.object({
   active: z.boolean(),
   description: z.string().max(200, 'Keep the description under 200 characters'),
+  district_admin_key: z.string().min(24, 'Generate an admin key of at least 24 characters'),
   supabase_anon_key: z.string().min(20, 'Paste the district project anon key'),
   supabase_url: z
     .string()
@@ -34,6 +35,18 @@ const labelClass = 'text-sm font-medium text-slate-700 dark:text-slate-200'
 
 const errorClass = 'mt-1 block text-sm text-red-600'
 
+// The district stores only a hash of this, so the value shown here is the only
+// copy. 32 random bytes, url-safe so it survives being pasted into SQL.
+function generateAdminKey() {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
 export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistrictDialogProps) {
   const queryClient = useQueryClient()
   const { addToast } = useToast()
@@ -44,16 +57,21 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
     handleSubmit,
     register,
     reset,
+    setValue,
+    watch,
   } = useForm<WaterDistrictValues>({
     defaultValues: {
       active: true,
       description: '',
+      district_admin_key: '',
       supabase_anon_key: '',
       supabase_url: '',
       water_district: '',
     },
     resolver: zodResolver(waterDistrictSchema),
   })
+
+  const adminKey = watch('district_admin_key')
 
   const closeAndReset = () => {
     reset()
@@ -63,13 +81,17 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
 
   const testMutation = useMutation({
     mutationFn: () => {
-      const { supabase_anon_key, supabase_url } = getValues()
+      const { district_admin_key, supabase_anon_key, supabase_url } = getValues()
 
       if (!supabase_url || !supabase_anon_key) {
         throw new Error('Enter the project URL and anon key first.')
       }
 
-      return testWaterDistrictConnection(supabase_url, supabase_anon_key)
+      if (!district_admin_key) {
+        throw new Error('Generate an admin key first.')
+      }
+
+      return testWaterDistrictConnection(supabase_url, supabase_anon_key, district_admin_key)
     },
     onError: (error) => {
       setTestState({
@@ -87,6 +109,7 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
       createWaterDistrict({
         active: values.active,
         description: values.description.trim() || null,
+        district_admin_key: values.district_admin_key.trim(),
         supabase_anon_key: values.supabase_anon_key.trim(),
         supabase_url: values.supabase_url.trim().replace(/\/+$/, ''),
         water_district: values.water_district.trim(),
@@ -168,6 +191,39 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
             <span className={errorClass}>{errors.supabase_anon_key.message}</span>
           ) : null}
         </label>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className={labelClass}>Admin Key</span>
+            <button
+              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-slate-200 dark:hover:bg-neutral-800"
+              onClick={() => setValue('district_admin_key', generateAdminKey())}
+              type="button"
+            >
+              Generate
+            </button>
+          </div>
+          <textarea
+            className={`${inputClass} min-h-16 resize-y font-mono text-xs`}
+            placeholder="Generate a key, then set the same value in the district project"
+            {...register('district_admin_key')}
+          />
+          {errors.district_admin_key ? (
+            <span className={errorClass}>{errors.district_admin_key.message}</span>
+          ) : null}
+
+          {adminKey ? (
+            <div className="mt-2 rounded-lg bg-slate-50 p-3 dark:bg-neutral-900">
+              <p className="text-xs leading-5 text-slate-600 dark:text-slate-400">
+                Run this in the district project's SQL editor, or the console cannot read its
+                devices. This key is not recoverable afterwards — the district stores only a hash.
+              </p>
+              <code className="mt-2 block overflow-x-auto whitespace-pre text-xs text-slate-800 dark:text-slate-200">
+                select public.set_district_admin_key('{adminKey}');
+              </code>
+            </div>
+          ) : null}
+        </div>
 
         <label className="mt-4 flex items-center gap-2">
           <input

@@ -35,9 +35,20 @@ npm run dev
 
 Run `supabase/central_registration_app.sql` in the central Supabase project. Add one row to `RegistrationApp` for each Water District. No code changes are needed when a new district is added.
 
-Run `supabase/installation_requests.sql` in each Water District project. It creates `installation_requests`, keeps `updated_at` server side with a trigger, and restricts access: devices may insert a PENDING request with the anon key, only registration administrators may read the table or change a status, and a device reads back its own status through `get_registration_status(device_id)`.
+Run `supabase/installation_requests.sql` in each Water District project. It creates `installation_requests`, keeps `updated_at` server side with a trigger, and restricts access: devices may insert a PENDING request with the anon key, they get no read access to the table at all, and a device reads back its own status through `get_registration_status(device_id)`.
 
 Do not run it in the central project. The central project holds only the `RegistrationApp` registry; device records stay in the district project that owns them.
+
+### District admin key
+
+The console signs in to the central project, so the token it holds is signed by that project's key. A district project cannot verify it — each Supabase project verifies only its own keys, and PostgREST matches a token to a key by its `kid`, which a foreign token never carries. Sharing a signing secret between projects does not work around this.
+
+The console therefore authenticates to a district with a per-district admin key, checked inside `admin_list_installation_requests` and `admin_set_registration_status`. Adding a district takes two steps:
+
+1. In **Add Water District**, click **Generate** next to Admin Key. The dialog shows the statement to run.
+2. In the **district** project's SQL editor, run `select public.set_district_admin_key('<the generated key>');`
+
+The district stores only a SHA-256 hash, so the value in the registry row is the only copy. **Test Connection** verifies the key as well as the schema, so a mismatch is caught before the row is saved.
 
 The app creates Water District clients at runtime with:
 

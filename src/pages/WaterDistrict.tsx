@@ -52,10 +52,8 @@ export default function WaterDistrict() {
     enabled: Boolean(districtId && !centralConfigError),
   })
 
-  const { client, connectedDistrict, isConnected } = useSupabaseConnection(
-    waterDistrictQuery.data,
-    adminSessionQuery.data,
-  )
+  const { client, connectedDistrict, isConnected } = useSupabaseConnection(waterDistrictQuery.data)
+  const districtAdminKey = waterDistrictQuery.data?.district_admin_key ?? null
 
   useEffect(() => {
     if (connectedDistrict) {
@@ -70,7 +68,7 @@ export default function WaterDistrict() {
         throw new Error('Water District connection is not ready')
       }
 
-      return fetchInstallationRequests(client)
+      return fetchInstallationRequests(client, districtAdminKey)
     },
     enabled: Boolean(client && isConnected),
   })
@@ -86,7 +84,7 @@ export default function WaterDistrict() {
         throw new Error('Water District connection is not ready')
       }
 
-      return updateInstallationRequestStatus(client, request.id, status)
+      return updateInstallationRequestStatus(client, districtAdminKey, request.id, status)
     },
     onError: (error) => {
       addToast({

@@ -13,6 +13,13 @@ create table if not exists public."RegistrationApp" (
   created_at timestamptz not null default now()
 );
 
+-- The key the console presents to this district's admin functions. The district
+-- stores only its hash, so this column is the only copy of the value. Null on
+-- rows added before the column existed; those districts cannot be read until a
+-- key is set on both sides.
+alter table public."RegistrationApp"
+  add column if not exists district_admin_key text;
+
 alter table public."RegistrationApp" enable row level security;
 
 -- Rows hold every district's Supabase URL and anon key, so no unauthenticated

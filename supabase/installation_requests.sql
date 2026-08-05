@@ -123,6 +123,136 @@ $$;
 
 grant execute on function public.get_registration_status(text) to anon, authenticated;
 
+-- Console access to this district.
+--
+-- The console signs in to the central project, so the token it holds is signed
+-- by that project's key. This project cannot verify it: each Supabase project
+-- verifies only its own keys, and PostgREST matches a token to a key by its
+-- kid, which a foreign token will never carry. Sharing a signing secret across
+-- projects does not work around that.
+--
+-- So the console authenticates to this district with a per-district admin key
+-- instead, checked inside the security definer functions below. Only the hash
+-- of that key is stored, so reading this table does not yield a usable key.
+create extension if not exists "pgcrypto";
+
+create table if not exists public.district_admin_credential (
+  -- Single row: the check constrains id to true, so a second insert conflicts.
+  id boolean primary key default true check (id),
+  key_hash text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.district_admin_credential enable row level security;
+
+-- No grants and no policies: the table is unreachable through PostgREST at
+-- all. The functions below read it as the owner, which is the only access path.
+revoke all on public.district_admin_credential from anon, authenticated;
+
+-- Sets this district's admin key. Run it from the SQL editor with the same
+-- value stored in the district's registry row in the central project:
+--
+--   select public.set_district_admin_key('paste-the-key-here');
+create or replace function public.set_district_admin_key(p_key text)
+returns void
+language sql
+security definer
+set search_path = public, extensions
+as $$
+  insert into public.district_admin_credential (id, key_hash, updated_at)
+  values (true, encode(digest(p_key, 'sha256'), 'hex'), now())
+  on conflict (id) do update
+    set key_hash = excluded.key_hash,
+        updated_at = now();
+$$;
+
+-- Postgres grants execute on a new function to public by default, which here
+-- would let anyone holding the anon key overwrite the admin key and take over
+-- the district. Revoke it and grant it to no one: the SQL editor runs as the
+-- owner and does not need the grant.
+revoke all on function public.set_district_admin_key(text) from public;
+
+create or replace function public.district_admin_key_matches(p_admin_key text)
+returns boolean
+language sql
+security definer
+set search_path = public, extensions
+stable
+as $$
+  select exists (
+    select 1
+    from public.district_admin_credential
+    where key_hash = encode(digest(p_admin_key, 'sha256'), 'hex')
+  );
+$$;
+
+revoke all on function public.district_admin_key_matches(text) from public;
+
+-- The console's read path. Returns nothing without the key, so the anon key on
+-- its own still exposes no part of the device inventory.
+create or replace function public.admin_list_installation_requests(p_admin_key text)
+returns setof public.installation_requests
+language plpgsql
+security definer
+set search_path = public, extensions
+stable
+as $$
+begin
+  if not public.district_admin_key_matches(p_admin_key) then
+    raise exception 'Invalid district admin key' using errcode = '42501';
+  end if;
+
+  return query
+    select *
+    from public.installation_requests
+    order by installed_at desc nulls last;
+end;
+$$;
+
+revoke all on function public.admin_list_installation_requests(text) from public;
+grant execute on function public.admin_list_installation_requests(text) to anon, authenticated;
+
+-- The console's decision path. The status is checked here as well as by the
+-- column constraint so a bad value fails before the update is attempted.
+create or replace function public.admin_set_registration_status(
+  p_admin_key text,
+  p_request_id bigint,
+  p_status text
+)
+returns public.installation_requests
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  updated public.installation_requests;
+begin
+  if not public.district_admin_key_matches(p_admin_key) then
+    raise exception 'Invalid district admin key' using errcode = '42501';
+  end if;
+
+  if p_status not in ('APPROVED', 'DENIED') then
+    raise exception 'Status must be APPROVED or DENIED' using errcode = '22023';
+  end if;
+
+  -- updated_at is left to the trigger.
+  update public.installation_requests
+  set registration_status = p_status
+  where id = p_request_id
+  returning * into updated;
+
+  if updated.id is null then
+    raise exception 'No installation request with id %', p_request_id
+      using errcode = 'P0002';
+  end if;
+
+  return updated;
+end;
+$$;
+
+revoke all on function public.admin_set_registration_status(text, bigint, text) from public;
+grant execute on function public.admin_set_registration_status(text, bigint, text) to anon, authenticated;
+
 -- PostgREST caches the schema, so a freshly created function can keep coming
 -- back as PGRST202 until it reloads.
 notify pgrst, 'reload schema';
