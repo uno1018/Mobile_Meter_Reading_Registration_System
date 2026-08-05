@@ -125,7 +125,7 @@ export async function createWaterDistrict(input: NewWaterDistrict) {
 }
 
 // Probes a district project before its credentials are stored. Anon has no
-// select on installation_request by design, so the check goes through the
+// select on installation_requests by design, so the check goes through the
 // status function instead -- which also proves the district schema was applied.
 export async function testWaterDistrictConnection(supabaseUrl: string, supabaseAnonKey: string) {
   const client = createWaterDistrictClient(supabaseUrl, supabaseAnonKey)
@@ -152,7 +152,7 @@ export async function testWaterDistrictConnection(supabaseUrl: string, supabaseA
 
 export async function fetchInstallationRequests(client: DistrictClient) {
   const { data, error } = await client
-    .from('installation_request')
+    .from('installation_requests')
     .select(installationRequestColumns)
     .order('installed_at', { ascending: false, nullsFirst: false })
 
@@ -169,7 +169,7 @@ export async function updateInstallationRequestStatus(
   status: RegistrationDecision,
 ) {
   const { data, error } = await client
-    .from('installation_request')
+    .from('installation_requests')
     // updated_at is set by a trigger in the district project, so it is not sent
     // here -- the update grant only covers registration_status.
     .update({ registration_status: status })
