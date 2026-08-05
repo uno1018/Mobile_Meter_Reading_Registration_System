@@ -60,7 +60,7 @@ export default function Navbar({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-medium text-teal-700 dark:text-teal-300 lg:hidden">
               <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              Meter Console
+              Meter Reading Console
             </div>
             <h1 className="mt-1 truncate text-2xl font-semibold text-slate-950 dark:text-white lg:mt-0">
               {title}

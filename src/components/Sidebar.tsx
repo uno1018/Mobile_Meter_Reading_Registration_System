@@ -22,7 +22,7 @@ export default function Sidebar() {
             <p className="text-sm font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
               Registration
             </p>
-            <p className="text-base font-semibold text-slate-950 dark:text-white">Meter Console</p>
+            <p className="text-base font-semibold text-slate-950 dark:text-white">Meter Reading Console</p>
           </div>
         </div>
 
