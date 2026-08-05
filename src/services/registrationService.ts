@@ -139,7 +139,7 @@ export async function testWaterDistrictConnection(supabaseUrl: string, supabaseA
 
   if (error.code === 'PGRST202') {
     throw new Error(
-      'Reached the project, but get_registration_status is missing. Run supabase/installation_request.sql there first.',
+      'Reached the project, but get_registration_status is missing. Run supabase/installation_requests.sql there first.',
     )
   }
 

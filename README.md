@@ -35,7 +35,7 @@ npm run dev
 
 Run `supabase/central_registration_app.sql` in the central Supabase project. Add one row to `RegistrationApp` for each Water District. No code changes are needed when a new district is added.
 
-Run `supabase/installation_request.sql` in each Water District project. It creates `installation_requests`, keeps `updated_at` server side with a trigger, and restricts access: devices may insert a PENDING request with the anon key, only registration administrators may read the table or change a status, and a device reads back its own status through `get_registration_status(device_id)`.
+Run `supabase/installation_requests.sql` in each Water District project. It creates `installation_requests`, keeps `updated_at` server side with a trigger, and restricts access: devices may insert a PENDING request with the anon key, only registration administrators may read the table or change a status, and a device reads back its own status through `get_registration_status(device_id)`.
 
 Do not run it in the central project. The central project holds only the `RegistrationApp` registry; device records stay in the district project that owns them.
 
