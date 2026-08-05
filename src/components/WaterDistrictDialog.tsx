@@ -1,11 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Plug, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { createWaterDistrict, testWaterDistrictConnection } from '../services/registrationService'
+import {
+  createWaterDistrict,
+  testWaterDistrictConnection,
+  updateWaterDistrict,
+} from '../services/registrationService'
 import { useToast } from '../hooks/useToast'
+import type { WaterDistrict } from '../types'
 
 const waterDistrictSchema = z.object({
   active: z.boolean(),
@@ -21,9 +26,11 @@ const waterDistrictSchema = z.object({
 
 type WaterDistrictValues = z.infer<typeof waterDistrictSchema>
 
-type AddWaterDistrictDialogProps = {
+type WaterDistrictDialogProps = {
   onClose: () => void
   open: boolean
+  // Absent for a new district; present puts the dialog in edit mode.
+  waterDistrict?: WaterDistrict | null
 }
 
 type TestState = { message: string; ok: boolean } | null
@@ -34,6 +41,15 @@ const inputClass =
 const labelClass = 'text-sm font-medium text-slate-700 dark:text-slate-200'
 
 const errorClass = 'mt-1 block text-sm text-red-600'
+
+const emptyValues: WaterDistrictValues = {
+  active: true,
+  description: '',
+  district_admin_key: '',
+  supabase_anon_key: '',
+  supabase_url: '',
+  water_district: '',
+}
 
 // The district stores only a hash of this, so the value shown here is the only
 // copy. 32 random bytes, url-safe so it survives being pasted into SQL.
@@ -47,10 +63,30 @@ function generateAdminKey() {
     .replace(/=+$/, '')
 }
 
-export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistrictDialogProps) {
+function toFormValues(waterDistrict: WaterDistrict | null | undefined): WaterDistrictValues {
+  if (!waterDistrict) {
+    return emptyValues
+  }
+
+  return {
+    active: waterDistrict.active,
+    description: waterDistrict.description ?? '',
+    district_admin_key: waterDistrict.district_admin_key ?? '',
+    supabase_anon_key: waterDistrict.supabase_anon_key,
+    supabase_url: waterDistrict.supabase_url,
+    water_district: waterDistrict.water_district,
+  }
+}
+
+export default function WaterDistrictDialog({
+  onClose,
+  open,
+  waterDistrict,
+}: WaterDistrictDialogProps) {
   const queryClient = useQueryClient()
   const { addToast } = useToast()
   const [testState, setTestState] = useState<TestState>(null)
+  const isEdit = Boolean(waterDistrict)
   const {
     formState: { errors },
     getValues,
@@ -60,21 +96,27 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
     setValue,
     watch,
   } = useForm<WaterDistrictValues>({
-    defaultValues: {
-      active: true,
-      description: '',
-      district_admin_key: '',
-      supabase_anon_key: '',
-      supabase_url: '',
-      water_district: '',
-    },
+    defaultValues: emptyValues,
     resolver: zodResolver(waterDistrictSchema),
   })
 
+  // One dialog instance serves whichever row was opened, so the fields are
+  // refilled every time it opens rather than only on mount.
+  useEffect(() => {
+    if (open) {
+      reset(toFormValues(waterDistrict))
+      setTestState(null)
+    }
+  }, [open, reset, waterDistrict])
+
   const adminKey = watch('district_admin_key')
+  // An edit that leaves the key alone needs no SQL, so only show the statement
+  // when the value differs from what the district was last told.
+  const adminKeyChanged =
+    Boolean(adminKey) && adminKey !== (waterDistrict?.district_admin_key ?? '')
 
   const closeAndReset = () => {
-    reset()
+    reset(emptyValues)
     setTestState(null)
     onClose()
   }
@@ -104,28 +146,39 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
     },
   })
 
-  const createMutation = useMutation({
-    mutationFn: (values: WaterDistrictValues) =>
-      createWaterDistrict({
+  const saveMutation = useMutation({
+    mutationFn: (values: WaterDistrictValues) => {
+      const input = {
         active: values.active,
         description: values.description.trim() || null,
         district_admin_key: values.district_admin_key.trim(),
         supabase_anon_key: values.supabase_anon_key.trim(),
         supabase_url: values.supabase_url.trim().replace(/\/+$/, ''),
         water_district: values.water_district.trim(),
-      }),
+      }
+
+      return waterDistrict
+        ? updateWaterDistrict(waterDistrict.id, input)
+        : createWaterDistrict(input)
+    },
     onError: (error) => {
       addToast({
-        message: error instanceof Error ? error.message : 'The registry row could not be created.',
-        title: 'Could not add Water District',
+        message:
+          error instanceof Error
+            ? error.message
+            : `The registry row could not be ${isEdit ? 'updated' : 'created'}.`,
+        title: isEdit ? 'Could not save Water District' : 'Could not add Water District',
         type: 'error',
       })
     },
     onSuccess: async (district) => {
       await queryClient.invalidateQueries({ queryKey: ['water-districts'] })
+      await queryClient.invalidateQueries({ queryKey: ['water-district', district.id] })
       addToast({
-        message: `${district.water_district} was added to the registry.`,
-        title: 'Water District added',
+        message: isEdit
+          ? `${district.water_district} was updated.`
+          : `${district.water_district} was added to the registry.`,
+        title: isEdit ? 'Water District saved' : 'Water District added',
         type: 'success',
       })
       closeAndReset()
@@ -140,10 +193,12 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
       <form
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-neutral-800 dark:bg-neutral-950"
-        onSubmit={handleSubmit((values) => createMutation.mutate(values))}
+        onSubmit={handleSubmit((values) => saveMutation.mutate(values))}
       >
         <div>
-          <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Add Water District</h2>
+          <h2 className="text-lg font-semibold text-slate-950 dark:text-white">
+            {isEdit ? 'Edit Water District' : 'Add Water District'}
+          </h2>
           <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
             Registers a district Supabase project. Use that project's own URL and anon key, not the
             central project's.
@@ -200,7 +255,7 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
               onClick={() => setValue('district_admin_key', generateAdminKey())}
               type="button"
             >
-              Generate
+              {isEdit ? 'Regenerate' : 'Generate'}
             </button>
           </div>
           <textarea
@@ -212,7 +267,7 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
             <span className={errorClass}>{errors.district_admin_key.message}</span>
           ) : null}
 
-          {adminKey ? (
+          {adminKeyChanged ? (
             <div className="mt-2 rounded-lg bg-slate-50 p-3 dark:bg-neutral-900">
               <p className="text-xs leading-5 text-slate-600 dark:text-slate-400">
                 Run this in the district project's SQL editor, or the console cannot read its
@@ -281,7 +336,7 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button
             className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:text-slate-200 dark:hover:bg-neutral-900"
-            disabled={createMutation.isPending}
+            disabled={saveMutation.isPending}
             onClick={closeAndReset}
             type="button"
           >
@@ -289,13 +344,13 @@ export default function AddWaterDistrictDialog({ onClose, open }: AddWaterDistri
           </button>
           <button
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:opacity-80"
-            disabled={createMutation.isPending}
+            disabled={saveMutation.isPending}
             type="submit"
           >
-            {createMutation.isPending ? (
+            {saveMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : null}
-            Add Water District
+            {isEdit ? 'Save Changes' : 'Add Water District'}
           </button>
         </div>
       </form>

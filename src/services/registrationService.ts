@@ -156,6 +156,33 @@ export async function createWaterDistrict(input: NewWaterDistrict) {
   return data as WaterDistrict
 }
 
+export async function updateWaterDistrict(waterDistrictId: string, input: NewWaterDistrict) {
+  const supabase = getCentralSupabaseClient()
+  const { data, error } = await supabase
+    .from('RegistrationApp')
+    .update(input)
+    .eq('id', waterDistrictId)
+    .select('*')
+    .single()
+
+  if (error) {
+    throw toError(error, 'The registry row could not be updated.')
+  }
+
+  return data as WaterDistrict
+}
+
+// Removes the registry row only. Devices live in the district's own project and
+// are untouched, so re-adding the district brings its inventory back.
+export async function deleteWaterDistrict(waterDistrictId: string) {
+  const supabase = getCentralSupabaseClient()
+  const { error } = await supabase.from('RegistrationApp').delete().eq('id', waterDistrictId)
+
+  if (error) {
+    throw toError(error, 'The registry row could not be deleted.')
+  }
+}
+
 // Probes a district project before its credentials are stored. Anon has no
 // select on installation_requests by design, so the check goes through the
 // status function instead -- which also proves the district schema was applied.

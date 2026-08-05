@@ -50,6 +50,8 @@ The console therefore authenticates to a district with a per-district admin key,
 
 The district stores only a SHA-256 hash, so the value in the registry row is the only copy. **Test Connection** verifies the key as well as the schema, so a mismatch is caught before the row is saved.
 
+To rotate a key later, edit the district and click **Regenerate**. The statement to run reappears, and it is only shown when the key actually changed — editing a name or description leaves the district untouched. Deleting a district removes the registry row only; its devices stay in its own project, so re-adding it brings the inventory back.
+
 The app creates Water District clients at runtime with:
 
 ```ts
