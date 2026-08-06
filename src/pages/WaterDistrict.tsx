@@ -108,7 +108,13 @@ export default function WaterDistrict() {
       })
     },
     onSuccess: async (enabled) => {
-      await queryClient.invalidateQueries({ queryKey: ['district-devices-enabled', districtId] })
+      // The switch rewrites registration_status on every approved row, so the
+      // table is stale the moment it returns. Refetch both, otherwise the rows
+      // keep reading APPROVED until someone presses Refresh.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['district-devices-enabled', districtId] }),
+        queryClient.invalidateQueries({ queryKey: ['installation-requests', districtId] }),
+      ])
       addToast({
         message: enabled
           ? 'Approvals are restored and devices can register again.'
